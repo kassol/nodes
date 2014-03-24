@@ -35,10 +35,12 @@ public:
 	enum{header_length = 4};
 	enum{max_body_length = 512};
 
+	enum{mt_length = 2};
+
 	MyMsg()
 		: body_length_(0)
 	{
-
+		memset(data_, 0, header_length+max_body_length);
 	}
 
 	const char* data()const
@@ -98,6 +100,44 @@ public:
 		char header[header_length+1];
 		sprintf(header, "%4d", body_length_);
 		memcpy(data_, header, header_length);
+	}
+
+	MsgType msg_type()
+	{
+		char szmt[mt_length+1] = "";
+		std::strncat(szmt, data_+header_length, mt_length);
+		int mt = atoi(szmt);
+		if (mt >= MT_MASTER && mt <= MT_PING_BACK)
+		{
+			return MsgType(mt);
+		}
+		return MT_ERROR;
+	}
+
+	bool encode_body(MsgType mt, const char* szbuf)
+	{
+		body_length_ = strlen(szbuf)+mt_length;
+		if (body_length_ > max_body_length)
+		{
+			body_length_ = 0;
+			return false;
+		}
+		char szmt[mt_length+1] = "";
+		sprintf(szmt, "%02x", mt);
+		memcpy(data_+header_length, szmt, mt_length);
+		memcpy(data_+header_length+mt_length, szbuf, strlen(szbuf));
+		return true;
+	}
+
+	std::string decode_body()
+	{
+		char* temp = new char[body_length_-mt_length+1];
+		memset(temp, 0, body_length_-mt_length+1);
+		memcpy(temp, data_+header_length+mt_length, body_length_-mt_length);
+		std::string msg(temp);
+		delete []temp;
+		temp = NULL;
+		return msg;
 	}
 
 private:
