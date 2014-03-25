@@ -117,6 +117,7 @@ public:
 		, is_scan_finished(true)
 		, is_ping_busy(false)
 		, is_busy(false)
+		, master_session(NULL)
 	{
 		is_connected = Initialize();
 		if (is_connected)
@@ -136,6 +137,7 @@ private:
 	bool Initialize();
 	void ParseProj();
 	void Distribute(session* new_session, std::string ip);
+	void ParseMetafile();
 
 private:
 	void start_accept();
@@ -146,6 +148,7 @@ private:
 	void handle_connect(session* new_session, const boost::system::error_code& error);
 	void handle_connect(session* new_session, msg_struct* msg,
 		const boost::system::error_code& error);
+	void handle_result(MsgType mt);
 	void handle_msg(session* new_session, MyMsg msg);
 	void send_metafile(session* new_session, addr_struct* addr,
 		const boost::system::error_code& error);
@@ -172,6 +175,8 @@ private:
 
 	std::vector<node_struct> available_list;
 	std::vector<task_struct> task_list_;
+
+	session* master_session;
 
 public:
 	static std::fstream outfile;
@@ -301,8 +306,8 @@ private:
 			log(error.message().c_str());
 			if (is_available)
 			{
-				delete this;
 				is_available = false;
+				delete this;
 			}
 		}
 	}
@@ -321,8 +326,8 @@ private:
 			log(error.message().c_str());
 			if (is_available)
 			{
-				delete this;
 				is_available = false;
+				delete this;
 			}
 		}
 	}
@@ -355,7 +360,15 @@ private:
 		{
 			file.close();
 			log(error.message().c_str());
-			delete this;
+			if (is_available)
+			{
+				is_available = false;
+				delete this;
+				if (st_ == ST_METAFILE)
+				{
+					owner_->handle_result(MT_METAFILE_FAIL);
+				}
+			}
 		}
 	}
 
@@ -388,7 +401,11 @@ private:
 		{
 			file.close();
 			log(error.message().c_str());
-			delete this;
+			if (is_available)
+			{
+				is_available = false;
+				delete this;
+			}
 		}
 	}
 
@@ -404,8 +421,8 @@ private:
 			log(error.message().c_str());
 			if (is_available)
 			{
-				delete this;
 				is_available = false;
+				delete this;
 			}
 		}
 	}
@@ -418,12 +435,25 @@ private:
 			log("Recv Over");
 			file.write(data_buf, last_length);
 			file.close();
+			if (st_ == ST_METAFILE)
+			{
+				owner_->handle_result(MT_METAFILE_FINISH);
+			}
 		}
 		else
 		{
+			file.close();
 			log(error.message().c_str());
+			if (st_ == ST_METAFILE)
+			{
+				owner_->handle_result(MT_METAFILE_FAIL);
+			}
 		}
-		delete this;
+		if (is_available)
+		{
+			is_available = false;
+			delete this;
+		}
 	}
 
 	void handle_write_over(unsigned __int64 last_length,
@@ -439,7 +469,11 @@ private:
 			file.close();
 			log(error.message().c_str());
 		}
-		delete this;
+		if (is_available)
+		{
+			is_available = false;
+			delete this;
+		}
 	}
 
 private:

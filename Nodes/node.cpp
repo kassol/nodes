@@ -18,7 +18,9 @@ void log(const char* p)
 	std::string out(current_time);
 	out += p;
 	std::cout<<out<<"\n";
+	node::outfile.open("log.txt", std::ios::out|std::ios::app);
 	node::outfile<<out<<"\n";
+	node::outfile.close();
 }
 
 bool node::Initialize()
@@ -88,6 +90,11 @@ void node::Distribute(session* new_session, std::string ip)
 		}
 		++ite_task;
 	}
+}
+
+void node::ParseMetafile()
+{
+	log("Parse metafile");
 }
 
 void node::Start()
@@ -165,6 +172,7 @@ void node::handle_accept(session* new_session,
 {
 	if (!error)
 	{
+		master_session = new_session;
 		boost::system::error_code ec;
 		tcp::endpoint ep = new_session->socket().remote_endpoint(ec);
 		if (!ec)
@@ -325,7 +333,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		{
 			if (std::string(result) == ip_)
 			{
-
+				Distribute(new_session, ip);
 			}
 			else
 			{
@@ -453,6 +461,17 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		{
 			break;
 		}
+	}
+}
+
+void node::handle_result(MsgType mt)
+{
+	log("Stop listen on 8999");
+	file_acceptor_.close();
+	master_session->send_msg(mt, "");
+	if (mt == MT_METAFILE_FINISH)
+	{
+		ParseMetafile();
 	}
 }
 

@@ -14,8 +14,6 @@ int main(int argc, char* argv[])
 	boost::asio::io_service service;
 	unsigned short nport = 8992;
 	node* nodeptr = new node(service, nport);
-
-	node::outfile.open("log.txt", std::ios::out);
 	if (argc == 2)
 	{
 		std::string arg(argv[1]);
@@ -32,7 +30,6 @@ int main(int argc, char* argv[])
 	}
 	delete nodeptr;
 	nodeptr = NULL;
-	node::outfile.close();
 	return 0;
 }
 
