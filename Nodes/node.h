@@ -70,6 +70,30 @@ struct msg_struct
 	std::string ip_;
 };
 
+struct file_struct
+{
+	file_struct(std::string filename, unsigned __int64 filesize)
+		: filename_(filename)
+		, filesize_(filesize)
+	{
+
+	}
+	std::string filename_;
+	unsigned __int64 filesize_;
+};
+
+struct addr_struct
+{
+	addr_struct(std::string ip, unsigned short port)
+		: ip_(ip)
+		, port_(port)
+	{
+
+	}
+	std::string ip_;
+	unsigned short port_;
+};
+
 class node : public boost::enable_shared_from_this<node>
 	, boost::noncopyable
 {
@@ -111,24 +135,31 @@ public:
 private:
 	bool Initialize();
 	void ParseProj();
+	void Distribute(session* new_session, std::string ip);
 
 private:
 	void start_accept();
 	void start_scan();
 	void handle_accept(session* new_session, const boost::system::error_code& error);
+	void handle_accept_file(session* new_session, file_struct* file,
+		const boost::system::error_code& error);
 	void handle_connect(session* new_session, const boost::system::error_code& error);
 	void handle_connect(session* new_session, msg_struct* msg,
 		const boost::system::error_code& error);
 	void handle_msg(session* new_session, MyMsg msg);
+	void send_metafile(session* new_session, addr_struct* addr,
+		const boost::system::error_code& error);
 
 private:
 	NodeType nt_;
 	std::string ip_;
 	std::string master_ip;
+	std::string metafile_name;
 	unsigned short listen_port;
 	boost::asio::io_service& io_service_;
 	boost::asio::ip::tcp::acceptor acceptor_;
 	boost::asio::ip::tcp::acceptor file_acceptor_;
+
 
 	bool is_busy;
 	bool is_connected;
@@ -209,6 +240,52 @@ public:
 		}
 	}
 
+	void send_file(std::string filename, unsigned __int64 filesize)
+	{
+		log("Send...");
+		file.open(filename, std::ios::in|std::ios::binary);
+		if (filesize > max_data_block)
+		{
+			file.read(data_buf, max_data_block);
+			boost::asio::async_write(socket_,
+				boost::asio::buffer(data_buf, max_data_block),
+				boost::bind(&session::handle_write_file, this,
+				filesize-max_data_block,
+				boost::asio::placeholders::error));
+		}
+		else
+		{
+			file.read(data_buf, filesize);
+			boost::asio::async_write(socket_,
+				boost::asio::buffer(data_buf, static_cast<size_t>(filesize)),
+				boost::bind(&session::handle_write_over, this,
+				filesize,
+				boost::asio::placeholders::error));
+		}
+	}
+
+	void recv_file(std::string filename, unsigned __int64 filesize)
+	{
+		log("Recv...");
+		file.open(filename, std::ios::out|std::ios::binary);
+		if (filesize>max_data_block)
+		{
+			boost::asio::async_read(socket_,
+				boost::asio::buffer(data_buf, max_data_block),
+				boost::bind(&session::handle_read_file, this,
+				filesize-max_data_block,
+				boost::asio::placeholders::error));
+		}
+		else
+		{
+			boost::asio::async_read(socket_,
+				boost::asio::buffer(data_buf, static_cast<size_t>(filesize)),
+				boost::bind(&session::handle_read_over, this,
+				filesize,
+				boost::asio::placeholders::error));
+		}
+	}
+
 private:
 	void handle_read_header(const boost::system::error_code& error)
 	{
@@ -250,6 +327,71 @@ private:
 		}
 	}
 
+	void handle_read_file(unsigned __int64 bytes_to_transfer,
+		const boost::system::error_code& error)
+	{
+		if (!error)
+		{
+			//log("Recv...");
+			file.write(data_buf, max_data_block);
+			if (bytes_to_transfer > max_data_block)
+			{
+				boost::asio::async_read(socket_,
+					boost::asio::buffer(data_buf, max_data_block),
+					boost::bind(&session::handle_read_file, this,
+					bytes_to_transfer-max_data_block,
+					boost::asio::placeholders::error));
+			}
+			else
+			{
+				boost::asio::async_read(socket_,
+					boost::asio::buffer(data_buf, static_cast<size_t>(bytes_to_transfer)),
+					boost::bind(&session::handle_read_over, this,
+					bytes_to_transfer,
+					boost::asio::placeholders::error));
+			}
+		}
+		else
+		{
+			file.close();
+			log(error.message().c_str());
+			delete this;
+		}
+	}
+
+	void handle_write_file(unsigned __int64 bytes_to_transfer,
+		const boost::system::error_code& error)
+	{
+		if (!error)
+		{
+			//log("Send...");
+			if (bytes_to_transfer > max_data_block)
+			{
+				file.read(data_buf, max_data_block);
+				boost::asio::async_write(socket_,
+					boost::asio::buffer(data_buf, max_data_block),
+					boost::bind(&session::handle_write_file, this,
+					bytes_to_transfer-max_data_block,
+					boost::asio::placeholders::error));
+			}
+			else
+			{
+				file.read(data_buf, bytes_to_transfer);
+				boost::asio::async_write(socket_,
+					boost::asio::buffer(data_buf, static_cast<size_t>(bytes_to_transfer)),
+					boost::bind(&session::handle_write_over, this,
+					bytes_to_transfer,
+					boost::asio::placeholders::error));
+			}
+		}
+		else
+		{
+			file.close();
+			log(error.message().c_str());
+			delete this;
+		}
+	}
+
 	void handle_write(const boost::system::error_code& error)
 	{
 		if (!error)
@@ -268,15 +410,49 @@ private:
 		}
 	}
 
+	void handle_read_over(unsigned __int64 last_length,
+		const boost::system::error_code& error)
+	{
+		if (!error)
+		{
+			log("Recv Over");
+			file.write(data_buf, last_length);
+			file.close();
+		}
+		else
+		{
+			log(error.message().c_str());
+		}
+		delete this;
+	}
+
+	void handle_write_over(unsigned __int64 last_length,
+		const boost::system::error_code& error)
+	{
+		if (!error)
+		{
+			log("Send Over");
+			file.close();
+		}
+		else
+		{
+			file.close();
+			log(error.message().c_str());
+		}
+		delete this;
+	}
+
 private:
 	boost::asio::ip::tcp::socket socket_;
 	MyMsg msg_out;
 	MyMsg msg_in;
-	enum{max_data_block = 1024};
+	enum{max_data_block = 1024000};
 	char data_buf[max_data_block];
 	SessionType st_;
 	node* owner_;
 	bool is_recving;
 	bool is_available;
+
+	std::fstream file;
 };
 

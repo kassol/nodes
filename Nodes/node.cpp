@@ -62,7 +62,32 @@ bool node::Initialize()
 
 void node::ParseProj()
 {
+	task_list_.push_back(task_struct("D:\\data\\052844887030_01_P023_MUL.tif", 0));
+}
 
+void node::Distribute(session* new_session, std::string ip)
+{
+	auto ite_task = task_list_.begin();
+	while(ite_task != task_list_.end())
+	{
+		if (ite_task->state_ == 0)
+		{
+			ite_task->ip_ = ip;
+			ite_task->state_ = 1;
+			char filesize[50] = "";
+			unsigned __int64 nfilesize = 
+				boost::filesystem::file_size(ite_task->task_);
+			sprintf(filesize, "%I64x", nfilesize);
+			std::string filename = 
+				ite_task->task_.substr(ite_task->task_.rfind('\\')+1,
+				ite_task->task_.size()-ite_task->task_.rfind('\\')-1);
+			std::string strmsg = filesize+std::string("|");
+			strmsg += filename;
+			new_session->send_msg(MT_METAFILE, strmsg.c_str());
+			break;
+		}
+		++ite_task;
+	}
 }
 
 void node::Start()
@@ -158,6 +183,22 @@ void node::handle_accept(session* new_session,
 		delete new_session;
 	}
 	start_accept();
+}
+
+void node::handle_accept_file(session* new_session, file_struct* file,
+	const boost::system::error_code& error)
+{
+	if (!error)
+	{
+		log(("RECV"+file->filename_).c_str());
+		new_session->recv_file(file->filename_, file->filesize_);
+	}
+	else
+	{
+		log(error.message().c_str());
+		delete new_session;
+	}
+	delete file;
 }
 
 void node::handle_connect(session* new_session,
@@ -269,27 +310,73 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			{
 				available_list.push_back(node_struct(ip));
 				log(("Add leaf node "+ip).c_str());
-				log("Ping");
-				session* ping_session = new session(io_service_, this);
-				ping_session->socket().async_connect(
-					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
-					boost::bind(&node::handle_connect, this, ping_session,
-					new msg_struct(MT_PING, "", ip),
-					boost::asio::placeholders::error));
+// 				log("Ping");
+// 				session* ping_session = new session(io_service_, this);
+// 				ping_session->socket().async_connect(
+// 					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
+// 					boost::bind(&node::handle_connect, this, ping_session,
+// 					new msg_struct(MT_PING, "", ip),
+// 					boost::asio::placeholders::error));
 			}
-			
+			Distribute(new_session, ip);
 			break;
 		}
 	case MT_OCCUPIED:
 		{
+			if (std::string(result) == ip_)
+			{
+
+			}
+			else
+			{
+				log((ip+" is occupied").c_str());
+			}
 			break;
 		}
 	case MT_METAFILE:
 		{
+			char* pathname;
+			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
+			metafile_name = 
+				std::string(pathname).substr(1, std::string(pathname).size()-1);
+
+			unsigned short file_port = 8999;
+			boost::system::error_code ec;
+			tcp::endpoint ep(tcp::v4(), file_port);
+			file_acceptor_.open(ep.protocol());
+			file_acceptor_.bind(ep, ec);
+			if (ec)
+			{
+				log(ec.message().c_str());
+				new_session->send_msg(MT_METAFILE_FAIL, "");
+				break;
+			}
+			file_acceptor_.listen();
+			log("Start listen port 8999");
+			session* file_session = new session(io_service_, this, ST_METAFILE);
+			file_acceptor_.async_accept(file_session->socket(),
+				boost::bind(&node::handle_accept_file, this, file_session,
+				new file_struct(metafile_name, filesize),
+				boost::asio::placeholders::error));
+
+			char* pfileport = new char[5];
+			memset(pfileport, 0, 5);
+			sprintf(pfileport, "%04x", file_port);
+			new_session->send_msg(MT_METAFILE_READY, pfileport);
 			break;
 		}
 	case MT_METAFILE_READY:
 		{
+			char* rest;
+			unsigned short file_port = 
+				(unsigned short)strtoul(result.c_str(), &rest, 16);
+			log("Connect to the file_port");
+			session* file_session = new session(io_service_, this, ST_METAFILE);
+			file_session->socket().async_connect(
+				tcp::endpoint(boost::asio::ip::address::from_string(ip), file_port),
+				boost::bind(&node::send_metafile, this, file_session,
+				new addr_struct(ip, file_port),
+				boost::asio::placeholders::error));
 			break;
 		}
 	case MT_METAFILE_FINISH:
@@ -357,7 +444,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 					ite->is_busy = false;
 				}
 			}
-			Sleep(2000);
+			//Sleep(200);
 			log("Ping");
 			new_session->send_msg(MT_PING, "");
 			break;
@@ -366,5 +453,37 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		{
 			break;
 		}
+	}
+}
+
+void node::send_metafile(session* new_session, addr_struct* addr,
+	const boost::system::error_code& error)
+{
+	if (!error)
+	{
+		std::string task_path;
+		for (size_t i = 0; i < task_list_.size(); ++i)
+		{
+			if (task_list_.at(i).ip_ == addr->ip_ && task_list_.at(i).state_ == 1)
+			{
+				task_path = task_list_.at(i).task_;
+				break;
+			}
+		}
+		log(task_path.c_str());
+		if (task_path == "")
+		{
+			delete new_session;
+			delete addr;
+			return;
+		}
+		log("Send metafile");
+		new_session->send_file(task_path, boost::filesystem::file_size(task_path));
+		delete addr;
+	}
+	else
+	{
+		log(error.message().c_str());
+		delete new_session;
 	}
 }
