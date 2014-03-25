@@ -106,7 +106,9 @@ public:
 	{
 		char szmt[mt_length+1] = "";
 		std::strncat(szmt, data_+header_length, mt_length);
-		int mt = atoi(szmt);
+		char* end;
+		int mt = strtol(szmt, &end, 16);
+
 		if (mt >= MT_MASTER && mt <= MT_PING_BACK)
 		{
 			return MsgType(mt);
@@ -138,6 +140,11 @@ public:
 		delete []temp;
 		temp = NULL;
 		return msg;
+	}
+
+	void free()
+	{
+		memset(data_, 0, header_length+max_body_length);
 	}
 
 private:

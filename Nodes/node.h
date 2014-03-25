@@ -115,12 +115,11 @@ private:
 private:
 	void start_accept();
 	void start_scan();
-	void start_ping();
 	void handle_accept(session* new_session, const boost::system::error_code& error);
 	void handle_connect(session* new_session, const boost::system::error_code& error);
 	void handle_connect(session* new_session, msg_struct* msg,
 		const boost::system::error_code& error);
-	void handle_msg(std::string ip, MyMsg msg);
+	void handle_msg(session* new_session, MyMsg msg);
 
 private:
 	NodeType nt_;
@@ -142,6 +141,9 @@ private:
 
 	std::vector<node_struct> available_list;
 	std::vector<task_struct> task_list_;
+
+public:
+	static std::fstream outfile;
 };
 
 
@@ -160,13 +162,9 @@ public:
 		: socket_(io_service)
 		, owner_(owner)
 		, st_(st)
+		, is_recving(false)
 	{
-		
-	}
-
-	~session()
-	{
-		socket_.close();
+		is_available = true;
 	}
 
 	boost::asio::ip::tcp::socket& socket()
@@ -174,45 +172,61 @@ public:
 		return socket_;
 	}
 
-	void handle_accept()
+	void recv_msg()
 	{
+		if (is_recving)
+		{
+			return;
+		}
+		log("Start receive");
+		is_recving = true;
+		msg_in.free();
 		boost::asio::async_read(socket_,
-			boost::asio::buffer(msg_.data(), MyMsg::header_length),
+			boost::asio::buffer(msg_in.data(), MyMsg::header_length),
 			boost::bind(&session::handle_read_header, this,
 			boost::asio::placeholders::error));
 	}
 
 	void send_msg(MsgType mt, const char* szbuf)
 	{
-		if (msg_.encode_body(mt, szbuf))
+		log("Start send");
+		if (msg_out.encode_body(mt, szbuf))
 		{
-			msg_.encode_header();
+			msg_out.encode_header();
 			boost::asio::async_write(socket_,
-				boost::asio::buffer(msg_.data(),
-				msg_.length()),
+				boost::asio::buffer(msg_out.data(),
+				msg_out.length()),
 				boost::bind(&session::handle_write, this,
 				boost::asio::placeholders::error));
 		}
 		else
 		{
-			delete this;
+			if (is_available)
+			{
+				delete this;
+				is_available = false;
+			}
 		}
 	}
 
 private:
 	void handle_read_header(const boost::system::error_code& error)
 	{
-		if (!error && msg_.decode_header())
+		if (!error && msg_in.decode_header())
 		{
 			boost::asio::async_read(socket_,
-				boost::asio::buffer(msg_.body(), msg_.body_length()),
+				boost::asio::buffer(msg_in.body(), msg_in.body_length()),
 				boost::bind(&session::handle_read_body, this,
 				boost::asio::placeholders::error));
 		}
 		else
 		{
 			log(error.message().c_str());
-			delete this;
+			if (is_available)
+			{
+				delete this;
+				is_available = false;
+			}
 		}
 	}
 
@@ -220,26 +234,20 @@ private:
 	{
 		if (!error)
 		{
-// 			std::cout.write(msg_.body(), msg_.body_length());
-// 			std::cout<<"\n";
-			log(msg_.body());
+			log(msg_in.body());
 			log("Read over");
-			boost::system::error_code ec;
-			boost::asio::ip::tcp::endpoint ep = socket_.remote_endpoint(ec);
-			if (!ec)
-			{
-				owner_->handle_msg(ep.address().to_string(), msg_);
-			}
-			else
-			{
-				log(error.message().c_str());
-			}
+			is_recving = false;
+			owner_->handle_msg(this, msg_in);
 		}
 		else
 		{
 			log(error.message().c_str());
+			if (is_available)
+			{
+				delete this;
+				is_available = false;
+			}
 		}
-		delete this;
 	}
 
 	void handle_write(const boost::system::error_code& error)
@@ -247,20 +255,28 @@ private:
 		if (!error)
 		{
 			log("Write over");
+			recv_msg();
 		}
 		else
 		{
 			log(error.message().c_str());
+			if (is_available)
+			{
+				delete this;
+				is_available = false;
+			}
 		}
-		delete this;
 	}
 
 private:
 	boost::asio::ip::tcp::socket socket_;
-	MyMsg msg_;
+	MyMsg msg_out;
+	MyMsg msg_in;
 	enum{max_data_block = 1024};
 	char data_buf[max_data_block];
 	SessionType st_;
 	node* owner_;
+	bool is_recving;
+	bool is_available;
 };
 

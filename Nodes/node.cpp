@@ -5,6 +5,8 @@
 using namespace boost::asio;
 using boost::asio::ip::tcp;
 
+std::fstream node::outfile;
+
 void log(const char* p)
 {
 	time_t rawtime;
@@ -16,6 +18,7 @@ void log(const char* p)
 	std::string out(current_time);
 	out += p;
 	std::cout<<out<<"\n";
+	node::outfile<<out<<"\n";
 }
 
 bool node::Initialize()
@@ -81,7 +84,6 @@ void node::Start()
 
 	start_scan();
 
-	//start_ping();
 	while(true)
 	{
 		Sleep(1000);
@@ -133,32 +135,6 @@ void node::start_scan()
 	newd = NULL;
 }
 
-void node::start_ping()
-{
-	log("Start ping...");
-	is_ping_busy = true;
-
-	session* new_session = NULL;
-	while(is_ping_busy)
-	{
-		while(!available_list.empty())
-		{
-			std::for_each(available_list.begin(), available_list.end(),
-				[&](node_struct _node)
-			{
-				new_session = new session(io_service_, this);
-				new_session->socket().async_connect(
-					tcp::endpoint(boost::asio::ip::address::from_string(_node.ip_), listen_port),
-					boost::bind(&node::handle_connect, this, new_session,
-					new msg_struct(MT_PING, "", _node.ip_),
-					boost::asio::placeholders::error));
-			});
-			Sleep(500);
-		}
-		Sleep(2000);
-	}
-}
-
 void node::handle_accept(session* new_session,
 	const boost::system::error_code& error)
 {
@@ -174,7 +150,7 @@ void node::handle_accept(session* new_session,
 		{
 			log(ec.message().c_str());
 		}
-		new_session->handle_accept();
+		new_session->recv_msg();
 	}
 	else
 	{
@@ -208,7 +184,6 @@ void node::handle_connect(session* new_session,
 	}
 	else
 	{
-		//log(error.message().c_str());
 		delete new_session;
 	}
 	if (scan_count == 0)
@@ -253,11 +228,22 @@ void node::handle_connect(session* new_session, msg_struct* msg,
 	}
 }
 
-void node::handle_msg(std::string ip, MyMsg msg)
+void node::handle_msg(session* new_session, MyMsg msg)
 {
+	boost::system::error_code ec;
+	boost::asio::ip::tcp::endpoint ep = new_session->socket().remote_endpoint(ec);
+	if (ec)
+	{
+		log(ec.message().c_str());
+		delete new_session;
+		return;
+	}
+	std::string ip = ep.address().to_string();
 	MsgType mt = msg.msg_type();
 	std::string result = msg.decode_body();
-	session* new_session = NULL;
+
+	new_session->recv_msg();
+
 	switch(mt)
 	{
 	case MT_MASTER:
@@ -266,21 +252,12 @@ void node::handle_msg(std::string ip, MyMsg msg)
 			{
 				master_ip = ip;
 				log(("Connected to the master node "+master_ip).c_str());
-				new_session = new session(io_service_, this);
-				new_session->socket().async_connect(
-					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
-					boost::bind(&node::handle_connect, this, new_session,
-					new msg_struct(MT_AVAILABLE, "successful"),
-					boost::asio::placeholders::error));
+
+				new_session->send_msg(MT_AVAILABLE, "successful");
 			}
 			else
 			{
-				new_session = new session(io_service_, this);
-				new_session->socket().async_connect(
-					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
-					boost::bind(&node::handle_connect, this, new_session,
-					new msg_struct(MT_OCCUPIED, master_ip),
-					boost::asio::placeholders::error));
+				new_session->send_msg(MT_OCCUPIED, master_ip.c_str());
 			}
 			break;
 		}
@@ -292,6 +269,13 @@ void node::handle_msg(std::string ip, MyMsg msg)
 			{
 				available_list.push_back(node_struct(ip));
 				log(("Add leaf node "+ip).c_str());
+				log("Ping");
+				session* ping_session = new session(io_service_, this);
+				ping_session->socket().async_connect(
+					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
+					boost::bind(&node::handle_connect, this, ping_session,
+					new msg_struct(MT_PING, "", ip),
+					boost::asio::placeholders::error));
 			}
 			
 			break;
@@ -354,12 +338,8 @@ void node::handle_msg(std::string ip, MyMsg msg)
 		}
 	case MT_PING:
 		{
-			new_session = new session(io_service_, this);
-			new_session->socket().async_connect(
-				tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
-				boost::bind(&node::handle_connect, this, new_session,
-				new msg_struct(MT_PING_BACK, is_busy?"-1":"1", ip),
-				boost::asio::placeholders::error));
+			log("Ping back");
+			new_session->send_msg(MT_PING_BACK, is_busy?"-1":"1");
 			break;
 		}
 	case MT_PING_BACK:
@@ -377,6 +357,9 @@ void node::handle_msg(std::string ip, MyMsg msg)
 					ite->is_busy = false;
 				}
 			}
+			Sleep(2000);
+			log("Ping");
+			new_session->send_msg(MT_PING, "");
 			break;
 		}
 	case MT_ERROR:
