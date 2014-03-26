@@ -104,8 +104,8 @@ public:
 	friend class session;
 
 public:
-	node(boost::asio::io_service& io_service, unsigned short port)
-		: nt_(NT_NORMAL)
+	node(boost::asio::io_service& io_service, unsigned short port, NodeType nt)
+		: nt_(nt)
 		, ip_("")
 		, master_ip("")
 		, io_service_(io_service)
@@ -119,6 +119,7 @@ public:
 		, is_ping_busy(false)
 		, is_busy(false)
 		, is_requesting(false)
+		, is_feedback(false)
 		, master_session(NULL)
 	{
 		is_connected = Initialize();
@@ -141,6 +142,8 @@ private:
 	void Distribute(session* new_session, std::string ip);
 	void ParseMetafile();
 	void RequestFiles();
+	void Work();
+	void Feedback();
 
 private:
 	void start_accept();
@@ -174,6 +177,7 @@ private:
 	bool is_scan_finished;
 	bool is_requesting;
 	bool is_ping_busy;
+	bool is_feedback;
 
 	unsigned int limit_filenum_to_transfer;
 	unsigned int cur_filenum;
@@ -182,6 +186,7 @@ private:
 	std::vector<node_struct> available_list;
 	std::vector<task_struct> task_list_;
 	std::vector<task_struct> request_list;
+	std::vector<task_struct> feedback_list;
 
 	session* master_session;
 
@@ -381,6 +386,10 @@ private:
 				{
 					owner_->handle_result(MT_METAFILE_FAIL);
 				}
+				else if (st_ == ST_FILE_BACK)
+				{
+					owner_->handle_result(MT_FILE_BACK_FAIL);
+				}
 			}
 		}
 	}
@@ -418,6 +427,10 @@ private:
 			{
 				is_available = false;
 				delete this;
+				if (st_ == ST_FILE_BACK)
+				{
+					owner_->handle_result(MT_FILE_BACK_FAIL);
+				}
 			}
 		}
 	}
@@ -464,6 +477,10 @@ private:
 			{
 				owner_->handle_result(MT_FILE_FINISH);
 			}
+			else if (st_ == ST_FILE_BACK)
+			{
+				owner_->handle_result(MT_FILE_BACK_FINISH);
+			}
 		}
 		else
 		{
@@ -476,6 +493,10 @@ private:
 			else if (st_ == ST_FILE)
 			{
 				owner_->handle_result(MT_FILE_FAIL);
+			}
+			else if (st_ == ST_FILE_BACK)
+			{
+				owner_->handle_result(MT_FILE_BACK_FAIL);
 			}
 		}
 		if (is_available)
@@ -492,11 +513,19 @@ private:
 		{
 			log("Send Over");
 			file.close();
+			if (st_ == ST_FILE_BACK)
+			{
+				owner_->handle_result(MT_FILE_BACK_FINISH);
+			}
 		}
 		else
 		{
 			file.close();
 			log(error.message().c_str());
+			if (st_ == ST_FILE_BACK)
+			{
+				owner_->handle_result(MT_FILE_BACK_FAIL);
+			}
 		}
 		if (is_available)
 		{

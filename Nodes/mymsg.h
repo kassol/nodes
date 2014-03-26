@@ -25,6 +25,7 @@ enum MsgType
 	MT_FILE_BACK_FAIL,
 	MT_PING,
 	MT_PING_BACK,
+	MT_FINISH,
 	MT_ERROR
 };
 

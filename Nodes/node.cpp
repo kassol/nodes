@@ -64,7 +64,7 @@ bool node::Initialize()
 
 void node::ParseProj()
 {
-	task_list_.push_back(task_struct("D:\\proj.txt", 0));
+	task_list_.push_back(task_struct("D:\\proj1.txt", 0));
 }
 
 void node::Distribute(session* new_session, std::string ip)
@@ -156,7 +156,75 @@ void node::RequestFiles()
 		Sleep(1000);
 	}
 
-	log("Finish request file, Start to work");
+	log("Finish request file, Start working");
+
+	Work();
+}
+
+void node::Work()
+{
+	Sleep(5000);
+
+	feedback_list.push_back(task_struct("12.aux", 0));
+	log("12.aux");
+	feedback_list.push_back(task_struct("12.tfw", 0));
+	log("12.tfw");
+	Feedback();
+}
+
+void node::Feedback()
+{
+	auto ite = feedback_list.begin();
+	while(ite != feedback_list.end())
+	{
+		while(is_feedback)
+		{
+			Sleep(1000);
+		}
+		if (ite->state_ == 2)
+		{
+			++ite;
+			if (ite == feedback_list.end())
+			{
+				break;
+			}
+		}
+
+		is_feedback = true;
+
+		if (ite->state_ == 0)
+		{
+			ite->state_ = 1;
+		}
+
+		std::string filename = ite->task_;
+		unsigned __int64 nfilesize = boost::filesystem::file_size(filename);
+		char filesize[50];
+		sprintf(filesize, "%I64x", nfilesize);
+		std::string strmsg = filesize+std::string("|");
+		strmsg += filename;
+
+		master_session->send_msg(MT_FILE_BACK, strmsg.c_str());
+	}
+
+	while(!feedback_list.empty())
+	{
+		ite = feedback_list.begin();
+		while(ite != feedback_list.end())
+		{
+			if (ite->state_ == 2)
+			{
+				ite = feedback_list.erase(ite);
+				continue;
+			}
+			++ite;
+		}
+		Sleep(1000);
+	}
+
+	master_session->send_msg(MT_FINISH, "");
+	is_busy = false;
+	log("Free now");
 }
 
 void node::Start()
@@ -405,6 +473,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_METAFILE:
 		{
+			is_busy = true;
 			char* pathname;
 			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
 			metafile_name =
@@ -528,10 +597,51 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_BACK:
 		{
+			char* pathname;
+			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
+			std::string filepath =
+				std::string(pathname).substr(1, std::string(pathname).size()-1);
+			std::string filename = filepath.substr(filepath.rfind("\\")+1,
+				filepath.size()-filepath.rfind("\\")-1);
+			unsigned short file_port = 8999;
+			boost::system::error_code ec;
+			tcp::endpoint ep(tcp::v4(), file_port);
+			file_acceptor_.open(ep.protocol());
+			file_acceptor_.bind(ep, ec);
+			if (ec)
+			{
+				log(ec.message().c_str());
+				break;
+			}
+			file_acceptor_.listen();
+			log("Start listen 8999");
+			session* file_session = new session(io_service_, this, ST_FILE_BACK);
+			file_acceptor_.async_accept(file_session->socket(),
+				boost::bind(&node::handle_accept_file, this, file_session,
+				new file_struct(filename, filesize),
+				boost::asio::placeholders::error));
+
+			char* pfileport = new char[5];
+			memset(pfileport, 0, 5);
+			sprintf(pfileport, "%04x", file_port);
+			std::string strmsg = pfileport+std::string("|");
+			strmsg += filepath;
+			new_session->send_msg(MT_FILE_BACK_READY, strmsg.c_str());
 			break;
 		}
 	case MT_FILE_BACK_READY:
 		{
+			char* rest;
+			unsigned short file_port =
+				(unsigned short)strtoul(result.c_str(), &rest, 16);
+			std::string pathname =
+				std::string(rest).substr(1, std::string(rest).size()-1);
+			session* file_session = new session(io_service_, this, ST_FILE_BACK);
+			file_session->socket().async_connect(
+				tcp::endpoint(boost::asio::ip::address::from_string(ip), file_port),
+				boost::bind(&node::send_file, this, file_session,
+				new file_struct(pathname, 0),
+				boost::asio::placeholders::error));
 			break;
 		}
 	case MT_FILE_BACK_FINISH:
@@ -568,6 +678,11 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			new_session->send_msg(MT_PING, "");
 			break;
 		}
+	case MT_FINISH:
+		{
+			log((ip+" finish work").c_str());
+			break;
+		}
 	case MT_ERROR:
 		{
 			break;
@@ -577,25 +692,63 @@ void node::handle_msg(session* new_session, MyMsg msg)
 
 void node::handle_result(MsgType mt)
 {
-	log("Stop listen on 8999");
-	file_acceptor_.close();
-	master_session->send_msg(mt, "");
-	is_requesting = false;
-	if (mt == MT_METAFILE_FINISH)
+	if (!IsMaster())
 	{
-		boost::thread thr(boost::bind(&node::ParseMetafile, this));
-	}
-	else if (mt == MT_FILE_FINISH)
-	{
-		auto ite = request_list.begin();
-		while(ite != request_list.end())
+		master_session->send_msg(mt, "");
+		if (mt == MT_METAFILE_FINISH)
 		{
-			if (ite->state_ == 1)
+			log("Stop listen on 8999");
+			file_acceptor_.close();
+			boost::thread thr(boost::bind(&node::ParseMetafile, this));
+		}
+		else if (mt == MT_FILE_FINISH)
+		{
+			log("Stop listen on 8999");
+			file_acceptor_.close();
+			auto ite = request_list.begin();
+			while(ite != request_list.end())
 			{
-				ite->state_ = 2;
-				break;
+				if (ite->state_ == 1)
+				{
+					ite->state_ = 2;
+					is_requesting = false;
+					break;
+				}
+				++ite;
 			}
-			++ite;
+			is_requesting = false;
+		}
+		else if (mt == MT_FILE_BACK_FINISH)
+		{
+			auto ite = feedback_list.begin();
+			while(ite != feedback_list.end())
+			{
+				if (ite->state_ == 1)
+				{
+					ite->state_ = 2;
+					is_feedback = false;
+					break;
+				}
+				++ite;
+			}
+			is_feedback = false;
+		}
+		else if (mt == MT_FILE_BACK_FAIL)
+		{
+			is_feedback = false;
+		}
+	}
+	else
+	{
+		if (mt == MT_FILE_BACK_FINISH)
+		{
+			log("Stop listen on 8999");
+			file_acceptor_.close();
+		}
+		else if (mt == MT_FILE_BACK_FAIL)
+		{
+			log("Stop listen on 8999");
+			file_acceptor_.close();
 		}
 	}
 }
