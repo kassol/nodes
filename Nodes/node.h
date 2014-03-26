@@ -13,6 +13,7 @@
 #include <iostream>
 #include <string>
 #include <ctime>
+#include <deque>
 #include <vector>
 
 
@@ -117,6 +118,7 @@ public:
 		, is_scan_finished(true)
 		, is_ping_busy(false)
 		, is_busy(false)
+		, is_requesting(false)
 		, master_session(NULL)
 	{
 		is_connected = Initialize();
@@ -138,6 +140,7 @@ private:
 	void ParseProj();
 	void Distribute(session* new_session, std::string ip);
 	void ParseMetafile();
+	void RequestFiles();
 
 private:
 	void start_accept();
@@ -151,6 +154,8 @@ private:
 	void handle_result(MsgType mt);
 	void handle_msg(session* new_session, MyMsg msg);
 	void send_metafile(session* new_session, addr_struct* addr,
+		const boost::system::error_code& error);
+	void send_file(session* new_session, file_struct* file,
 		const boost::system::error_code& error);
 
 private:
@@ -167,6 +172,7 @@ private:
 	bool is_busy;
 	bool is_connected;
 	bool is_scan_finished;
+	bool is_requesting;
 	bool is_ping_busy;
 
 	unsigned int limit_filenum_to_transfer;
@@ -175,6 +181,7 @@ private:
 
 	std::vector<node_struct> available_list;
 	std::vector<task_struct> task_list_;
+	std::vector<task_struct> request_list;
 
 	session* master_session;
 
@@ -225,15 +232,21 @@ public:
 
 	void send_msg(MsgType mt, const char* szbuf)
 	{
-		log("Start send");
+		msg_out.free();
+		bool write_in_progress = !msg_out_que_.empty();
+
 		if (msg_out.encode_body(mt, szbuf))
 		{
 			msg_out.encode_header();
-			boost::asio::async_write(socket_,
-				boost::asio::buffer(msg_out.data(),
-				msg_out.length()),
-				boost::bind(&session::handle_write, this,
-				boost::asio::placeholders::error));
+			msg_out_que_.push_back(msg_out);
+			if (!write_in_progress)
+			{
+				boost::asio::async_write(socket_,
+					boost::asio::buffer(msg_out_que_.front().data(),
+					msg_out_que_.front().length()),
+					boost::bind(&session::handle_write, this,
+					boost::asio::placeholders::error));
+			}
 		}
 		else
 		{
@@ -413,8 +426,16 @@ private:
 	{
 		if (!error)
 		{
-			log("Write over");
+			msg_out_que_.pop_front();
 			recv_msg();
+			if (!msg_out_que_.empty())
+			{
+				boost::asio::async_write(socket_,
+					boost::asio::buffer(msg_out_que_.front().data(),
+					msg_out_que_.front().length()),
+					boost::bind(&session::handle_write, this,
+					boost::asio::placeholders::error));
+			}
 		}
 		else
 		{
@@ -439,6 +460,10 @@ private:
 			{
 				owner_->handle_result(MT_METAFILE_FINISH);
 			}
+			else if (st_ == ST_FILE)
+			{
+				owner_->handle_result(MT_FILE_FINISH);
+			}
 		}
 		else
 		{
@@ -447,6 +472,10 @@ private:
 			if (st_ == ST_METAFILE)
 			{
 				owner_->handle_result(MT_METAFILE_FAIL);
+			}
+			else if (st_ == ST_FILE)
+			{
+				owner_->handle_result(MT_FILE_FAIL);
 			}
 		}
 		if (is_available)
@@ -480,13 +509,13 @@ private:
 	boost::asio::ip::tcp::socket socket_;
 	MyMsg msg_out;
 	MyMsg msg_in;
-	enum{max_data_block = 1024000};
+	enum{max_data_block = 102400};
 	char data_buf[max_data_block];
 	SessionType st_;
 	node* owner_;
 	bool is_recving;
 	bool is_available;
-
 	std::fstream file;
+	std::deque<MyMsg> msg_out_que_;
 };
 
