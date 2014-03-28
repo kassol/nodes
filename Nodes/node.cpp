@@ -64,7 +64,7 @@ bool node::Initialize()
 
 void node::ParseProj()
 {
-	task_list_.push_back(task_struct("D:\\proj1.txt", 0));
+	task_list_.push_back(task_struct("D:\\proj.txt", 0));
 }
 
 void node::Distribute(session* new_session, std::string ip)
@@ -246,9 +246,9 @@ void node::Start()
 
 	start_scan();
 
-	while(true)
+	if (!is_ping_busy)
 	{
-		Sleep(1000);
+		boost::thread ping_thread(boost::bind(&node::start_ping, this));
 	}
 }
 
@@ -297,12 +297,42 @@ void node::start_scan()
 	newd = NULL;
 }
 
+void node::start_ping()
+{
+	while(available_list.empty())
+	{
+		Sleep(1000);
+	}
+
+	is_ping_busy = true;
+
+	session* new_session = NULL;
+	while(is_ping_busy)
+	{
+		std::for_each(available_list.begin(), available_list.end(),
+			[&](node_struct _node)
+		{
+			new_session = new session(io_service_, this);
+			new_session->socket().async_connect(
+				tcp::endpoint(boost::asio::ip::address::from_string(_node.ip_), listen_port),
+				boost::bind(&node::handle_connect, this, new_session,
+				new msg_struct(MT_PING, "", _node.ip_),
+				boost::asio::placeholders::error));
+		});
+
+		if (available_list.empty())
+		{
+			break;
+		}
+		Sleep(2000);
+	}
+}
+
 void node::handle_accept(session* new_session,
 	const boost::system::error_code& error)
 {
 	if (!error)
 	{
-		master_session = new_session;
 		boost::system::error_code ec;
 		tcp::endpoint ep = new_session->socket().remote_endpoint(ec);
 		if (!ec)
@@ -418,21 +448,21 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		return;
 	}
 	std::string ip = ep.address().to_string();
-	log(msg.body());
 	MsgType mt = msg.msg_type();
 	std::string result = msg.decode_body();
 
-	new_session->recv_msg();
 
 	switch(mt)
 	{
 	case MT_MASTER:
 		{
+			new_session->recv_msg();
 			if (master_ip == "")
 			{
 				master_ip = ip;
 				log(("Connected to the master node "+master_ip).c_str());
 
+				master_session = new_session;
 				new_session->send_msg(MT_AVAILABLE, "successful");
 			}
 			else
@@ -443,25 +473,20 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_AVAILABLE:
 		{
+			new_session->recv_msg();
 			auto ite = std::find(available_list.begin(),
 				available_list.end(), node_struct(ip));
 			if (ite == available_list.end())
 			{
 				available_list.push_back(node_struct(ip));
 				log(("Add leaf node "+ip).c_str());
-// 				log("Ping");
-// 				session* ping_session = new session(io_service_, this);
-// 				ping_session->socket().async_connect(
-// 					tcp::endpoint(boost::asio::ip::address::from_string(ip), listen_port),
-// 					boost::bind(&node::handle_connect, this, ping_session,
-// 					new msg_struct(MT_PING, "", ip),
-// 					boost::asio::placeholders::error));
 			}
 			Distribute(new_session, ip);
 			break;
 		}
 	case MT_OCCUPIED:
 		{
+			new_session->recv_msg();
 			if (std::string(result) == ip_)
 			{
 				Distribute(new_session, ip);
@@ -474,6 +499,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_METAFILE:
 		{
+			new_session->recv_msg();
 			is_busy = true;
 			char* pathname;
 			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
@@ -507,6 +533,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_METAFILE_READY:
 		{
+			new_session->recv_msg();
 			char* rest;
 			unsigned short file_port =
 				(unsigned short)strtoul(result.c_str(), &rest, 16);
@@ -521,14 +548,17 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_METAFILE_FINISH:
 		{
+			new_session->recv_msg();
 			break;
 		}
 	case MT_METAFILE_FAIL:
 		{
+			new_session->recv_msg();
 			break;
 		}
 	case MT_FILE_REQUEST:
 		{
+			new_session->recv_msg();
 			std::string filename(result);
 			log(filename.c_str());
 			unsigned __int64 nfilesize = boost::filesystem::file_size(filename);
@@ -541,6 +571,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE:
 		{
+			new_session->recv_msg();
 			char* pathname;
 			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
 			std::string filepath =
@@ -575,6 +606,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_READY:
 		{
+			new_session->recv_msg();
 			char* rest;
 			unsigned short file_port =
 				(unsigned short)strtoul(result.c_str(), &rest, 16);
@@ -590,14 +622,17 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_FINISH:
 		{
+			new_session->recv_msg();
 			break;
 		}
 	case MT_FILE_FAIL:
 		{
+			new_session->recv_msg();
 			break;
 		}
 	case MT_FILE_BACK:
 		{
+			new_session->recv_msg();
 			char* pathname;
 			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
 			std::string filepath =
@@ -632,6 +667,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_BACK_READY:
 		{
+			new_session->recv_msg();
 			char* rest;
 			unsigned short file_port =
 				(unsigned short)strtoul(result.c_str(), &rest, 16);
@@ -647,21 +683,24 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_BACK_FINISH:
 		{
+			new_session->recv_msg();
 			log("file back finish");
 			break;
 		}
 	case MT_FILE_BACK_FAIL:
 		{
+			new_session->recv_msg();
 			break;
 		}
 	case MT_PING:
 		{
-			//log("Ping back");
+			log("Ping back");
 			new_session->send_msg(MT_PING_BACK, is_busy?"-1":"1");
 			break;
 		}
 	case MT_PING_BACK:
 		{
+			delete new_session;
 			auto ite = std::find(available_list.begin(),
 				available_list.end(), node_struct(ip));
 			if (ite != available_list.end())
@@ -675,17 +714,17 @@ void node::handle_msg(session* new_session, MyMsg msg)
 					ite->is_busy = false;
 				}
 			}
-			//log("Ping");
-			new_session->send_msg(MT_PING, "");
 			break;
 		}
 	case MT_FINISH:
 		{
+			new_session->recv_msg();
 			log((ip+" finish work").c_str());
 			break;
 		}
 	case MT_ERROR:
 		{
+			new_session->recv_msg();
 			log("error");
 			break;
 		}

@@ -148,6 +148,7 @@ private:
 private:
 	void start_accept();
 	void start_scan();
+	void start_ping();
 	void handle_accept(session* new_session, const boost::system::error_code& error);
 	void handle_accept_file(session* new_session, file_struct* file,
 		const boost::system::error_code& error);
@@ -355,7 +356,6 @@ private:
 	{
 		if (!error)
 		{
-			//log("Recv...");
 			file.write(data_buf, max_data_block);
 			if (bytes_to_transfer > max_data_block)
 			{
@@ -399,7 +399,6 @@ private:
 	{
 		if (!error)
 		{
-			//log("Send...");
 			if (bytes_to_transfer > max_data_block)
 			{
 				file.read(data_buf, max_data_block);

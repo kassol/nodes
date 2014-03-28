@@ -20,9 +20,9 @@ int main(int argc, char* argv[])
 		if (arg == "server")
 		{
 			nodeptr = new node(service, nport, node::NT_MASTER);
-			boost::thread thrd(boost::bind(run_service, boost::ref(service)));
 			Sleep(1000);
 			nodeptr->Start();
+			service.run();
 		}
 		else if (arg == "client")
 		{
