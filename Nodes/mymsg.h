@@ -110,7 +110,7 @@ public:
 		char* end;
 		int mt = strtol(szmt, &end, 16);
 
-		if (mt >= MT_MASTER && mt <= MT_PING_BACK)
+		if (mt >= MT_MASTER && mt < MT_ERROR)
 		{
 			return MsgType(mt);
 		}

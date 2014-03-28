@@ -222,7 +222,7 @@ void node::Feedback()
 		Sleep(1000);
 	}
 
-	master_session->send_msg(MT_FINISH, "");
+	master_session->send_msg(MT_FINISH, "finish");
 	is_busy = false;
 	log("Free now");
 }
@@ -418,6 +418,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		return;
 	}
 	std::string ip = ep.address().to_string();
+	log(msg.body());
 	MsgType mt = msg.msg_type();
 	std::string result = msg.decode_body();
 
@@ -646,6 +647,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_FILE_BACK_FINISH:
 		{
+			log("file back finish");
 			break;
 		}
 	case MT_FILE_BACK_FAIL:
@@ -654,7 +656,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_PING:
 		{
-			log("Ping back");
+			//log("Ping back");
 			new_session->send_msg(MT_PING_BACK, is_busy?"-1":"1");
 			break;
 		}
@@ -673,8 +675,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 					ite->is_busy = false;
 				}
 			}
-			//Sleep(200);
-			log("Ping");
+			//log("Ping");
 			new_session->send_msg(MT_PING, "");
 			break;
 		}
@@ -685,6 +686,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		}
 	case MT_ERROR:
 		{
+			log("error");
 			break;
 		}
 	}
