@@ -64,7 +64,9 @@ bool node::Initialize()
 
 void node::ParseProj()
 {
-	task_list_.push_back(task_struct("D:\\proj.txt", 0));
+	//task_list_.push_back(task_struct("D:\\proj.txt", 0));
+	task_list_.push_back(task_struct("D:\\proj1.txt", 0));
+	task_list_.push_back(task_struct("D:\\proj2.txt", 0));
 }
 
 void node::Distribute(session* new_session, std::string ip)
@@ -461,12 +463,15 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			{
 				master_ip = ip;
 				log(("Connected to the master node "+master_ip).c_str());
-
 				master_session = new_session;
 				new_session->send_msg(MT_AVAILABLE, "successful");
 			}
 			else
 			{
+				if (master_ip == ip)
+				{
+					master_session = new_session;
+				}
 				new_session->send_msg(MT_OCCUPIED, master_ip.c_str());
 			}
 			break;
@@ -489,6 +494,13 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			new_session->recv_msg();
 			if (std::string(result) == ip_)
 			{
+				auto ite = std::find(available_list.begin(),
+					available_list.end(), node_struct(ip));
+				if (ite == available_list.end())
+				{
+					available_list.push_back(node_struct(ip));
+					log(("Add leaf node "+ip).c_str());
+				}
 				Distribute(new_session, ip);
 			}
 			else
@@ -720,12 +732,25 @@ void node::handle_msg(session* new_session, MyMsg msg)
 		{
 			new_session->recv_msg();
 			log((ip+" finish work").c_str());
+
+			auto ite_task = task_list_.begin();
+			while(ite_task != task_list_.end())
+			{
+				if (ite_task->state_ == 1 && ite_task->ip_ == ip)
+				{
+					ite_task->state_ = 2;
+					break;
+				}
+				++ite_task;
+			}
+
+			Distribute(new_session, ip);
 			break;
 		}
 	case MT_ERROR:
 		{
-			new_session->recv_msg();
-			log("error");
+			delete new_session;
+			log("Error message");
 			break;
 		}
 	}
@@ -808,7 +833,7 @@ void node::send_metafile(session* new_session, addr_struct* addr,
 				break;
 			}
 		}
-		log(task_path.c_str());
+		
 		if (task_path == "")
 		{
 			delete new_session;
