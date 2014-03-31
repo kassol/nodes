@@ -120,6 +120,7 @@ public:
 		, is_busy(false)
 		, is_requesting(false)
 		, is_feedback(false)
+		, is_receiving(false)
 		, master_session(NULL)
 	{
 		is_connected = Initialize();
@@ -179,6 +180,7 @@ private:
 	bool is_requesting;
 	bool is_ping_busy;
 	bool is_feedback;
+	bool is_receiving;
 
 	unsigned int limit_filenum_to_transfer;
 	unsigned int cur_filenum;
@@ -386,6 +388,10 @@ private:
 				{
 					owner_->handle_result(MT_METAFILE_FAIL);
 				}
+				else if ( st_ == ST_FILE)
+				{
+					owner_->handle_result(MT_FILE_FAIL);
+				}
 				else if (st_ == ST_FILE_BACK)
 				{
 					owner_->handle_result(MT_FILE_BACK_FAIL);
@@ -516,6 +522,14 @@ private:
 			{
 				owner_->handle_result(MT_FILE_BACK_FINISH);
 			}
+			else if (st_ == ST_METAFILE)
+			{
+				owner_->handle_result(MT_METAFILE_FINISH);
+			}
+			else if (st_ == ST_FILE)
+			{
+				owner_->handle_result(MT_FILE_FINISH);
+			}
 		}
 		else
 		{
@@ -524,6 +538,14 @@ private:
 			if (st_ == ST_FILE_BACK)
 			{
 				owner_->handle_result(MT_FILE_BACK_FAIL);
+			}
+			else if (st_ == ST_METAFILE)
+			{
+				owner_->handle_result(MT_METAFILE_FAIL);
+			}
+			else if (st_ == ST_FILE)
+			{
+				owner_->handle_result(MT_FILE_FAIL);
 			}
 		}
 		if (is_available)

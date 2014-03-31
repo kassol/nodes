@@ -74,8 +74,13 @@ void node::Distribute(session* new_session, std::string ip)
 	auto ite_task = task_list_.begin();
 	while(ite_task != task_list_.end())
 	{
+		while(cur_filenum >= limit_filenum_to_transfer)
+		{
+			Sleep(1000);
+		}
 		if (ite_task->state_ == 0)
 		{
+			++cur_filenum;
 			ite_task->ip_ = ip;
 			ite_task->state_ = 1;
 			char filesize[50] = "";
@@ -498,7 +503,8 @@ void node::handle_msg(session* new_session, MyMsg msg)
 				available_list.push_back(node_struct(ip));
 				log(("Add leaf node "+ip).c_str());
 			}
-			Distribute(new_session, ip);
+			boost::thread thr(boost::bind(&node::Distribute,
+				this, new_session, ip));
 			break;
 		}
 	case MT_OCCUPIED:
@@ -513,7 +519,8 @@ void node::handle_msg(session* new_session, MyMsg msg)
 					available_list.push_back(node_struct(ip));
 					log(("Add leaf node "+ip).c_str());
 				}
-				Distribute(new_session, ip);
+				boost::thread thr(boost::bind(&node::Distribute,
+					this, new_session, ip));
 			}
 			else
 			{
@@ -578,11 +585,29 @@ void node::handle_msg(session* new_session, MyMsg msg)
 	case MT_METAFILE_FAIL:
 		{
 			new_session->recv_msg();
+			auto ite = task_list_.begin();
+			while(ite != task_list_.end())
+			{
+				if (ite->state_ == 1 && ite->ip_ == ip)
+				{
+					boost::thread thr(boost::bind(&node::Distribute,
+						this, new_session, ip));
+					break;
+				}
+				++ite;
+			}
 			break;
 		}
 	case MT_FILE_REQUEST:
 		{
 			new_session->recv_msg();
+			if (cur_filenum >= limit_filenum_to_transfer)
+			{
+				new_session->send_msg(MT_FILE_REQUEST_FAIL, "");
+				break;
+			}
+
+			++cur_filenum;
 			std::string filename(result);
 			log(filename.c_str());
 			unsigned __int64 nfilesize = boost::filesystem::file_size(filename);
@@ -591,6 +616,11 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			std::string strmsg = filesize+std::string("|");
 			strmsg += filename;
 			new_session->send_msg(MT_FILE, strmsg.c_str());
+			break;
+		}
+	case MT_FILE_REQUEST_FAIL:
+		{
+			is_requesting = false;
 			break;
 		}
 	case MT_FILE:
@@ -657,6 +687,12 @@ void node::handle_msg(session* new_session, MyMsg msg)
 	case MT_FILE_BACK:
 		{
 			new_session->recv_msg();
+			if (is_receiving)
+			{
+				new_session->send_msg(MT_FILE_BACK_FAIL, "");
+				break;
+			}
+			is_receiving = true;
 			char* pathname;
 			unsigned __int64 filesize = _strtoui64(result.c_str(), &pathname, 16);
 			std::string filepath =
@@ -714,6 +750,7 @@ void node::handle_msg(session* new_session, MyMsg msg)
 	case MT_FILE_BACK_FAIL:
 		{
 			new_session->recv_msg();
+			is_feedback = false;
 			break;
 		}
 	case MT_PING:
@@ -755,8 +792,8 @@ void node::handle_msg(session* new_session, MyMsg msg)
 				}
 				++ite_task;
 			}
-
-			Distribute(new_session, ip);
+			boost::thread thr(boost::bind(&node::Distribute,
+				this, new_session, ip));
 			break;
 		}
 	case MT_FREE:
@@ -803,6 +840,12 @@ void node::handle_result(MsgType mt)
 			}
 			is_requesting = false;
 		}
+		else if (mt == MT_FILE_FAIL)
+		{
+			log("Stop listen on 8999");
+			file_acceptor_.close();
+			is_requesting = false;
+		}
 		else if (mt == MT_FILE_BACK_FINISH)
 		{
 			auto ite = feedback_list.begin();
@@ -829,11 +872,29 @@ void node::handle_result(MsgType mt)
 		{
 			log("Stop listen on 8999");
 			file_acceptor_.close();
+			is_receiving = false;
 		}
 		else if (mt == MT_FILE_BACK_FAIL)
 		{
 			log("Stop listen on 8999");
 			file_acceptor_.close();
+			is_receiving = false;
+		}
+		else if (mt == MT_METAFILE_FINISH)
+		{
+			--cur_filenum;
+		}
+		else if (mt == MT_METAFILE_FAIL)
+		{
+			--cur_filenum;
+		}
+		else if (mt == MT_FILE_FINISH)
+		{
+			--cur_filenum;
+		}
+		else if (mt == MT_FILE_FAIL)
+		{
+			--cur_filenum;
 		}
 	}
 }
