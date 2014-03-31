@@ -96,7 +96,7 @@ void node::Distribute(session* new_session, std::string ip)
 	if (ite_task == task_list_.end())
 	{
 		log("Task list is empty");
-		new_session->send_msg(MT_FREE, "");
+		new_session->send_msg(MT_FREE, "free");
 		auto ite = std::find(available_list.begin(), available_list.end(),
 			node_struct(ip));
 		if (ite != available_list.end())
@@ -762,16 +762,13 @@ void node::handle_msg(session* new_session, MyMsg msg)
 	case MT_FREE:
 		{
 			delete new_session;
-			new_session = NULL;
-			master_session = NULL;
 			master_ip = "";
 			log("No master now");
+			break;
 		}
 	case MT_ERROR:
 		{
 			delete new_session;
-			new_session = NULL;
-			master_session = NULL;
 			log("Error message");
 			break;
 		}
