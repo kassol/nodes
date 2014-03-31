@@ -26,6 +26,7 @@ enum MsgType
 	MT_PING,
 	MT_PING_BACK,
 	MT_FINISH,
+	MT_FREE,
 	MT_ERROR
 };
 

@@ -88,9 +88,21 @@ void node::Distribute(session* new_session, std::string ip)
 			std::string strmsg = filesize+std::string("|");
 			strmsg += filename;
 			new_session->send_msg(MT_METAFILE, strmsg.c_str());
-			break;
+			return;
 		}
 		++ite_task;
+	}
+
+	if (ite_task == task_list_.end())
+	{
+		log("Task list is empty");
+		new_session->send_msg(MT_FREE, "");
+		auto ite = std::find(available_list.begin(), available_list.end(),
+			node_struct(ip));
+		if (ite != available_list.end())
+		{
+			available_list.erase(ite);
+		}
 	}
 }
 
@@ -747,9 +759,19 @@ void node::handle_msg(session* new_session, MyMsg msg)
 			Distribute(new_session, ip);
 			break;
 		}
+	case MT_FREE:
+		{
+			delete new_session;
+			new_session = NULL;
+			master_session = NULL;
+			master_ip = "";
+			log("No master now");
+		}
 	case MT_ERROR:
 		{
 			delete new_session;
+			new_session = NULL;
+			master_session = NULL;
 			log("Error message");
 			break;
 		}
