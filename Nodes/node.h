@@ -182,8 +182,8 @@ private:
 	bool is_feedback;
 	bool is_receiving;
 
-	unsigned int limit_filenum_to_transfer;
-	unsigned int cur_filenum;
+	int limit_filenum_to_transfer;
+	int cur_filenum;
 
 
 	std::vector<node_struct> available_list;

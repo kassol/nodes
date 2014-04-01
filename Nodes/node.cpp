@@ -64,7 +64,7 @@ bool node::Initialize()
 
 void node::ParseProj()
 {
-	//task_list_.push_back(task_struct("D:\\proj.txt", 0));
+	task_list_.push_back(task_struct("D:\\proj.txt", 0));
 	task_list_.push_back(task_struct("D:\\proj1.txt", 0));
 	task_list_.push_back(task_struct("D:\\proj2.txt", 0));
 }
@@ -265,10 +265,10 @@ void node::Start()
 
 	start_scan();
 
-	if (!is_ping_busy)
-	{
-		boost::thread ping_thread(boost::bind(&node::start_ping, this));
-	}
+// 	if (!is_ping_busy)
+// 	{
+// 		boost::thread ping_thread(boost::bind(&node::start_ping, this));
+// 	}
 }
 
 bool node::IsMaster()
@@ -883,18 +883,34 @@ void node::handle_result(MsgType mt)
 		else if (mt == MT_METAFILE_FINISH)
 		{
 			--cur_filenum;
+			if (cur_filenum < 0)
+			{
+				cur_filenum = 0;
+			}
 		}
 		else if (mt == MT_METAFILE_FAIL)
 		{
 			--cur_filenum;
+			if (cur_filenum < 0)
+			{
+				cur_filenum = 0;
+			}
 		}
 		else if (mt == MT_FILE_FINISH)
 		{
 			--cur_filenum;
+			if (cur_filenum < 0)
+			{
+				cur_filenum = 0;
+			}
 		}
 		else if (mt == MT_FILE_FAIL)
 		{
 			--cur_filenum;
+			if (cur_filenum < 0)
+			{
+				cur_filenum = 0;
+			}
 		}
 	}
 }
