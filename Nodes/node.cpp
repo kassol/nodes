@@ -265,10 +265,10 @@ void node::Start()
 
 	start_scan();
 
-// 	if (!is_ping_busy)
-// 	{
-// 		boost::thread ping_thread(boost::bind(&node::start_ping, this));
-// 	}
+	if (!is_ping_busy)
+	{
+		boost::thread ping_thread(boost::bind(&node::start_ping, this));
+	}
 }
 
 bool node::IsMaster()
